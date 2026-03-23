@@ -1,5 +1,5 @@
 agno
-duckduckgo_search
+ddgs
 feedparser
 pypdf
 python-dotenv

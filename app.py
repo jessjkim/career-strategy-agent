@@ -10,7 +10,7 @@ from urllib.parse import quote_plus
 import feedparser
 from pypdf import PdfReader
 import streamlit as st
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from dotenv import load_dotenv
 
 
@@ -275,11 +275,30 @@ def collect_news(profile: Profile, rss_urls: List[str], query: str) -> List[Dict
 
 
 @st.cache_data(show_spinner=False)
-def collect_jobs(profile: Profile) -> List[Dict[str, Any]]:
-    base_query = f"{profile.role} {profile.location} {profile.industry}".strip()
-    hints = " OR ".join(JOB_SITE_HINTS)
-    query = f'{base_query} ({hints})'
-    items = ddg_search(query, max_results=25)
+def build_job_queries(profile: Profile, companies: List[Dict[str, Any]]) -> List[str]:
+    role_terms = profile.role or " ".join(profile.keywords)
+    location = profile.location
+    queries = []
+
+    if companies:
+        for company in companies:
+            name = company.get("name", "").strip()
+            if not name:
+                continue
+            query = f"{name} careers {role_terms} {location}".strip()
+            queries.append(query)
+    else:
+        base_query = f"{role_terms} {location} {profile.industry}".strip()
+        hints = " OR ".join(JOB_SITE_HINTS)
+        queries.append(f'{base_query} ({hints})')
+
+    return [q for q in queries if q.strip()]
+
+
+def collect_jobs(profile: Profile, companies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    items = []
+    for query in build_job_queries(profile, companies):
+        items.extend(ddg_search(query, max_results=15))
     items = dedupe_items(items)
     return rank_items(items, profile)
 
@@ -324,7 +343,7 @@ if st.button("Run search"):
         news_items = collect_news(profile, rss_urls, news_query)
 
     with st.spinner("Fetching jobs..."):
-        job_items = collect_jobs(effective_profile)
+        job_items = collect_jobs(effective_profile, suggested_companies)
 
     if use_agent:
         if not agent:
@@ -359,6 +378,8 @@ if st.button("Run search"):
 
     with col2:
         st.subheader("Job Listings")
+        if not job_items:
+            st.info("No job listings found. Try adding a role or uploading a resume.")
         for item in job_items[:15]:
             st.markdown(f"**{item.get('title','')}**")
             st.caption(f"{item.get('source','')} • {item.get('published','')}")
