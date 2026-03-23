@@ -1,5 +1,6 @@
 agno
 duckduckgo_search
 feedparser
+pypdf
 python-dotenv
 streamlit

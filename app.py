@@ -1,10 +1,14 @@
 import os
 from dataclasses import dataclass
 from datetime import datetime
+import io
+import json
+import re
 from typing import List, Dict, Any, Tuple
 from urllib.parse import quote_plus
 
 import feedparser
+from pypdf import PdfReader
 import streamlit as st
 from duckduckgo_search import DDGS
 from dotenv import load_dotenv
@@ -22,11 +26,7 @@ except Exception:
     AGNO_AVAILABLE = False
 
 
-DEFAULT_NEWS_RSS = [
-    "https://news.google.com/rss",
-    "https://news.google.com/rss/search?q=technology",
-    "https://news.google.com/rss/search?q=business",
-]
+DEFAULT_NEWS_RSS = []
 
 JOB_SITE_HINTS = [
     "site:boards.greenhouse.io",
@@ -71,6 +71,28 @@ def fetch_rss(url: str) -> List[Dict[str, Any]]:
             }
         )
     return items
+
+
+def extract_pdf_text(file_bytes: bytes) -> str:
+    reader = PdfReader(io.BytesIO(file_bytes))
+    chunks = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        chunks.append(text)
+    return "\n".join(chunks).strip()
+
+
+def parse_json_block(text: str) -> Dict[str, Any]:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            return {}
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return {}
 
 
 def ddg_search(query: str, max_results: int = 20) -> List[Dict[str, Any]]:
@@ -185,27 +207,46 @@ def enrich_with_agent(agent: Any, profile: Profile, items: List[Dict[str, Any]])
             item["why"] = f"LLM unavailable: {exc}"
 
 
+def analyze_resume(agent: Any, resume_text: str, inputs: Profile) -> Dict[str, Any]:
+    if not agent or not resume_text.strip():
+        return {}
+    prompt = (
+        "Extract structured insights from this resume and optional inputs.\n"
+        "Return JSON only with keys: inferred_role, keywords, suggested_companies.\n"
+        "Each suggested_companies item should be an object with name and reason.\n"
+        "Keep keywords to 8-12 short phrases.\n\n"
+        f"Inputs:\n"
+        f"- Role: {inputs.role}\n"
+        f"- Industry: {inputs.industry}\n"
+        f"- Skills: {', '.join(inputs.skills)}\n"
+        f"- Location: {inputs.location}\n"
+        f"- Seniority: {inputs.seniority}\n"
+        f"- Keywords: {', '.join(inputs.keywords)}\n"
+        f"- Exclusions: {', '.join(inputs.exclusions)}\n\n"
+        f"Resume:\n{resume_text}\n"
+    )
+    try:
+        response = agent.run(prompt)
+        text = getattr(response, "content", None) or getattr(response, "output", None)
+        return parse_json_block(text or str(response))
+    except Exception:
+        return {}
+
+
 st.set_page_config(page_title="Industry News + Jobs Agent", layout="wide")
 st.title("Industry News + Jobs Agent")
 
 with st.sidebar:
     st.header("Profile")
-    role = st.text_input("Target role", "Product Manager")
-    industry = st.text_input("Industry", "AI / ML")
-    skills = st.text_input("Skills (comma)", "python, analytics, roadmap")
-    location = st.text_input("Location", "Remote")
+    role = st.text_input("Target role", "")
+    industry = st.text_input("Industry", "")
+    skills = st.text_input("Skills (comma)", "")
+    location = st.text_input("Location", "")
     seniority = st.selectbox("Seniority", ["", "Junior", "Mid", "Senior", "Lead"])
-    keywords = st.text_input("Keywords (comma)", "agent, llm, ai")
-    exclusions = st.text_input("Exclude terms (comma)", "intern")
+    keywords = st.text_input("Keywords (comma)", "")
+    exclusions = st.text_input("Exclude terms (comma)", "")
     st.divider()
-    news_rss = st.text_area(
-        "News RSS feeds (one per line)",
-        "\n".join(DEFAULT_NEWS_RSS),
-        height=120,
-    )
-    add_google_news_query = st.text_input(
-        "Add Google News query (optional)", "AI industry trends"
-    )
+    resume_file = st.file_uploader("Upload resume (PDF)", type=["pdf"])
     st.divider()
     use_agent = st.checkbox("Use Agno + OpenAI for match explanations", value=True)
     model_id = st.text_input("OpenAI model id", "gpt-4o-mini")
@@ -223,12 +264,12 @@ profile = Profile(
 
 
 @st.cache_data(show_spinner=False)
-def collect_news(profile: Profile, rss_urls: List[str], extra_query: str) -> List[Dict[str, Any]]:
+def collect_news(profile: Profile, rss_urls: List[str], query: str) -> List[Dict[str, Any]]:
     items = []
     for url in rss_urls:
         items.extend(fetch_rss(url))
-    if extra_query.strip():
-        items.extend(fetch_rss(build_google_news_rss(extra_query.strip())))
+    if query.strip():
+        items.extend(fetch_rss(build_google_news_rss(query.strip())))
     items = dedupe_items(items)
     return rank_items(items, profile)
 
@@ -244,19 +285,48 @@ def collect_jobs(profile: Profile) -> List[Dict[str, Any]]:
 
 
 if st.button("Run search"):
-    rss_urls = [u.strip() for u in news_rss.splitlines() if u.strip()]
-    if not rss_urls:
-        st.warning("Add at least one RSS feed.")
+    resume_text = ""
+    if resume_file is not None:
+        resume_text = extract_pdf_text(resume_file.getvalue())
+
+    agent = make_agent(model_id) if use_agent else None
+    resume_insights = analyze_resume(agent, resume_text, profile)
+    inferred_role = resume_insights.get("inferred_role", "")
+    resume_keywords = resume_insights.get("keywords", [])
+    suggested_companies = resume_insights.get("suggested_companies", [])
+
+    rss_urls = list(DEFAULT_NEWS_RSS)
+    query_parts = [
+        profile.industry or "",
+        inferred_role or "",
+        " ".join(profile.keywords),
+        " ".join(resume_keywords),
+    ]
+    news_query = " ".join([p for p in query_parts if p]).strip()
+    if not news_query:
+        st.warning("Add an industry, keywords, or upload a resume to fetch news.")
+        st.stop()
+
+    effective_profile = Profile(
+        role=profile.role or inferred_role,
+        industry=profile.industry,
+        skills=profile.skills,
+        location=profile.location,
+        seniority=profile.seniority,
+        keywords=profile.keywords or resume_keywords,
+        exclusions=profile.exclusions,
+    )
+    if not effective_profile.role and not effective_profile.keywords:
+        st.warning("Add a target role/keywords or upload a resume to fetch jobs.")
         st.stop()
 
     with st.spinner("Fetching news..."):
-        news_items = collect_news(profile, rss_urls, add_google_news_query)
+        news_items = collect_news(profile, rss_urls, news_query)
 
     with st.spinner("Fetching jobs..."):
-        job_items = collect_jobs(profile)
+        job_items = collect_jobs(effective_profile)
 
     if use_agent:
-        agent = make_agent(model_id)
         if not agent:
             st.warning("Agno not available. Install requirements and restart.")
         else:
@@ -266,6 +336,16 @@ if st.button("Run search"):
 
     col1, col2 = st.columns(2)
     with col1:
+        if suggested_companies:
+            st.subheader("Suggested Companies")
+            for company in suggested_companies[:10]:
+                name = company.get("name", "").strip()
+                reason = company.get("reason", "").strip()
+                if name:
+                    st.markdown(f"**{name}**")
+                    if reason:
+                        st.write(reason)
+                    st.divider()
         st.subheader("Industry News")
         for item in news_items[:15]:
             st.markdown(f"**{item.get('title','')}**")
