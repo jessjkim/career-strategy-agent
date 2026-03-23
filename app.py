@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
+from urllib.parse import quote_plus
 
 import feedparser
 import streamlit as st
@@ -53,7 +54,7 @@ def normalize_list(value: str) -> List[str]:
 
 
 def build_google_news_rss(query: str) -> str:
-    return f"https://news.google.com/rss/search?q={query}"
+    return f"https://news.google.com/rss/search?q={quote_plus(query)}"
 
 
 def fetch_rss(url: str) -> List[Dict[str, Any]]:
