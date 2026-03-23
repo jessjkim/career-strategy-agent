@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from urllib.parse import quote_plus
 
 import feedparser
+import httpx
 from pypdf import PdfReader
 import streamlit as st
 from dotenv import load_dotenv
@@ -86,6 +87,86 @@ def parse_json_block(text: str) -> Dict[str, Any]:
             return {}
 
 
+SUPPORTED_ATS = {"lever", "greenhouse", "smartrecruiters"}
+
+
+def fetch_lever_jobs(slug: str) -> List[Dict[str, Any]]:
+    url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
+    try:
+        resp = httpx.get(url, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return []
+
+
+def fetch_greenhouse_jobs(slug: str) -> List[Dict[str, Any]]:
+    url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+    try:
+        resp = httpx.get(url, timeout=10)
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("jobs", [])
+    except Exception:
+        return []
+
+
+def fetch_smartrecruiters_jobs(slug: str) -> List[Dict[str, Any]]:
+    url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
+    try:
+        resp = httpx.get(url, timeout=10)
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("content", [])
+    except Exception:
+        return []
+
+
+def normalize_role_terms(role: str, keywords: List[str]) -> List[str]:
+    terms = []
+    if role:
+        terms.extend(role.lower().split())
+    for kw in keywords:
+        terms.extend(kw.lower().split())
+    return [t for t in terms if t]
+
+
+def title_matches(title: str, terms: List[str]) -> bool:
+    title_lower = title.lower()
+    return any(t in title_lower for t in terms)
+
+
+def find_job_url_from_ats(company: Dict[str, Any], role: str, keywords: List[str]) -> str:
+    ats = (company.get("ats") or "").lower().strip()
+    slug = (company.get("ats_slug") or "").strip()
+    if ats not in SUPPORTED_ATS or not slug:
+        return ""
+    terms = normalize_role_terms(role, keywords)
+    jobs = []
+    if ats == "lever":
+        jobs = fetch_lever_jobs(slug)
+        for job in jobs:
+            title = job.get("text", "")
+            if terms and not title_matches(title, terms):
+                continue
+            return job.get("hostedUrl", "") or ""
+    if ats == "greenhouse":
+        jobs = fetch_greenhouse_jobs(slug)
+        for job in jobs:
+            title = job.get("title", "")
+            if terms and not title_matches(title, terms):
+                continue
+            return job.get("absolute_url", "") or ""
+    if ats == "smartrecruiters":
+        jobs = fetch_smartrecruiters_jobs(slug)
+        for job in jobs:
+            title = job.get("name", "")
+            if terms and not title_matches(title, terms):
+                continue
+            return job.get("ref", "") or job.get("applyUrl", "") or ""
+    return ""
+
+
 def dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen = set()
     deduped = []
@@ -150,7 +231,7 @@ def enrich_with_agent(agent: Any, profile: Profile, items: List[Dict[str, Any]])
             item["why"] = f"LLM unavailable: {exc}"
 
 
-def analyze_resume(agent: Any, resume_text: str, inputs: Profile) -> Dict[str, Any]:
+def analyze_resume(agent: Any, resume_text: str, inputs: Profile, company_count: int) -> Dict[str, Any]:
     if not agent or not resume_text.strip():
         return {}
     prompt = (
@@ -159,7 +240,10 @@ def analyze_resume(agent: Any, resume_text: str, inputs: Profile) -> Dict[str, A
         "strategy, keywords, suggested_companies.\n"
         "strengths: 4-6 bullets. strategy: 3-5 bullets tied to industry trends.\n"
         "keywords: 8-12 short phrases.\n"
-        "suggested_companies: list of objects with name, category, notes, job_url.\n\n"
+        f"suggested_companies: list of {company_count} objects with name, category, notes, ats, ats_slug.\n"
+        "ats must be one of: lever, greenhouse, smartrecruiters.\n"
+        "ats_slug is the company slug for that ATS.\n"
+        "Only include real, currently operating companies. Do not invent names.\n\n"
         f"Inputs:\n"
         f"- Target role: {inputs.role}\n"
         f"- Industry: {inputs.industry}\n"
@@ -175,6 +259,8 @@ def analyze_resume(agent: Any, resume_text: str, inputs: Profile) -> Dict[str, A
         return parse_json_block(text or str(response))
     except Exception:
         return {}
+
+
 
 
 st.set_page_config(page_title="Resume Strategy Agent", layout="wide")
@@ -193,6 +279,7 @@ with st.sidebar:
     resume_file = st.file_uploader("Upload resume (PDF)", type=["pdf"])
     st.divider()
     use_agent = st.checkbox("Use Agno + OpenAI for match explanations", value=True)
+    company_count = st.number_input("Number of company targets", min_value=10, max_value=40, value=20, step=5)
     model_id = st.text_input("OpenAI model id", "gpt-4o-mini")
 
 
@@ -227,13 +314,26 @@ if st.button("Run analysis"):
         st.stop()
 
     agent = make_agent(model_id) if use_agent else None
-    resume_insights = analyze_resume(agent, resume_text, profile)
+    resume_insights = analyze_resume(agent, resume_text, profile, int(company_count))
     inferred_role = resume_insights.get("inferred_role", "")
     inferred_industry = resume_insights.get("inferred_industry", "")
     resume_keywords = resume_insights.get("keywords", [])
     strengths = resume_insights.get("strengths", [])
     strategy = resume_insights.get("strategy", [])
     suggested_companies = resume_insights.get("suggested_companies", [])
+    verified_companies = []
+    for company in suggested_companies:
+        name = company.get("name", "")
+        job_url = find_job_url_from_ats(
+            company,
+            profile.role or inferred_role or "",
+            resume_keywords,
+        )
+        if not job_url:
+            continue
+        company["job_url"] = job_url
+        verified_companies.append(company)
+    suggested_companies = verified_companies
 
     rss_urls = list(DEFAULT_NEWS_RSS)
     query_parts = [
