@@ -1,5 +1,4 @@
 agno
-ddgs
 feedparser
 pypdf
 python-dotenv
