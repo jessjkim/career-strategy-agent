@@ -242,13 +242,16 @@ def summarize_news(agent: Any, news_items: List[Dict[str, Any]]) -> str:
 st.set_page_config(page_title="Resume Strategy Agent", layout="wide")
 st.title("Resume Strategy Agent")
 
-with st.sidebar:
-    st.header("Profile")
+st.header("Inputs")
+col_a, col_b, col_c = st.columns(3)
+with col_a:
     role = st.text_input("Target role", "")
+with col_b:
     industry = st.text_input("Industry", "")
+with col_c:
     location = st.text_input("Location", "")
-    st.divider()
-    resume_file = st.file_uploader("Upload resume (PDF)", type=["pdf"])
+resume_file = st.file_uploader("Upload resume (PDF)", type=["pdf"])
+run_analysis = st.button("Run analysis")
 
 
 profile = Profile(
@@ -273,7 +276,7 @@ def collect_news(profile: Profile, rss_urls: List[str], query: str) -> List[Dict
     return rank_items(items)
 
 
-if st.button("Run analysis"):
+if run_analysis:
     resume_text = ""
     if resume_file is not None:
         resume_text = extract_pdf_text(resume_file.getvalue())
@@ -317,6 +320,7 @@ if st.button("Run analysis"):
         with st.spinner("Explaining matches..."):
             enrich_with_agent(agent, profile, news_items[:10])
 
+    st.header("Analysis")
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Strengths")
