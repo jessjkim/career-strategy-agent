@@ -195,17 +195,17 @@ def analyze_resume(agent: Any, resume_text: str, inputs: Profile, company_count:
         return {}
 
 
-def extract_companies_from_news(agent: Any, news_items: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-    if not agent or not news_items:
+def extract_companies_from_items(agent: Any, items: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    if not agent or not items:
         return []
     sample = "\n".join(
-        [f"- {item.get('title','')} | {item.get('source','')}" for item in news_items[:25]]
+        [f"- {item.get('title','')} | {item.get('source','')}" for item in items[:40]]
     )
     prompt = (
-        "Extract company names mentioned or strongly implied by these news headlines.\n"
+        "Extract company names mentioned or strongly implied by these search results.\n"
         f"Return JSON only: list of up to {limit} objects with name, category, notes.\n"
         "Only include real companies. Do not invent names.\n\n"
-        f"Headlines:\n{sample}\n"
+        f"Results:\n{sample}\n"
     )
     try:
         response = agent.run(prompt)
@@ -216,6 +216,28 @@ def extract_companies_from_news(agent: Any, news_items: List[Dict[str, Any]], li
         return parsed.get("companies", [])
     except Exception:
         return []
+
+
+def collect_company_search_items(industry: str, inferred_industry: str, keywords: List[str]) -> List[Dict[str, Any]]:
+    seed = industry or inferred_industry
+    if not seed:
+        return []
+    query_templates = [
+        f"{seed} startup funding",
+        f"{seed} Series A",
+        f"{seed} Series B",
+        f"{seed} raises funding",
+        f"{seed} partnership",
+        f"{seed} launches product",
+        f"{seed} acquisition",
+    ]
+    if keywords:
+        query_templates.extend([f"{seed} {kw} company" for kw in keywords[:5]])
+
+    items = []
+    for query in query_templates:
+        items.extend(fetch_rss(build_google_news_rss(query)))
+    return dedupe_items(items)
 
 
 def summarize_news(agent: Any, news_items: List[Dict[str, Any]]) -> str:
@@ -240,9 +262,73 @@ def summarize_news(agent: Any, news_items: List[Dict[str, Any]]) -> str:
 
 
 st.set_page_config(page_title="Resume Strategy Agent", layout="wide")
-st.title("Resume Strategy Agent")
 
-st.header("Inputs")
+st.markdown(
+    """
+    <style>
+    .app-title {
+        font-size: 36px;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+    .app-subtitle {
+        font-size: 18px;
+        color: #6b7280;
+        margin-bottom: 24px;
+    }
+    .input-card {
+        background: #f7f7f4;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 18px;
+        margin-bottom: 12px;
+    }
+    .badge-success {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #e9f5e6;
+        color: #1f7a1f;
+        border: 1px solid #b9e0b2;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    .tab-card {
+        background: #f5f5f0;
+        border-radius: 10px;
+        padding: 16px 18px;
+        margin-bottom: 12px;
+        border-left: 5px solid #2f6fed;
+    }
+    .tab-card.green {
+        border-left-color: #2e9b50;
+    }
+    .news-item {
+        padding: 10px 0;
+        border-bottom: 1px solid #ececec;
+    }
+    .news-title {
+        font-weight: 600;
+    }
+    .news-meta {
+        color: #6b7280;
+        font-size: 12px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown('<div class="app-title">Resume strategy agent</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="app-subtitle">Upload your resume and get a personalized job search strategy</div>',
+    unsafe_allow_html=True,
+)
+
+st.markdown('<div class="input-card">', unsafe_allow_html=True)
+st.subheader("Inputs")
 col_a, col_b, col_c = st.columns(3)
 with col_a:
     role = st.text_input("Target role", "")
@@ -251,7 +337,14 @@ with col_b:
 with col_c:
     location = st.text_input("Location", "")
 resume_file = st.file_uploader("Upload resume (PDF)", type=["pdf"])
-run_analysis = st.button("Run analysis")
+if resume_file is not None:
+    st.markdown(
+        f'<span class="badge-success">✓ {resume_file.name}</span>',
+        unsafe_allow_html=True,
+    )
+run_analysis = st.button("Run analysis", use_container_width=True)
+st.markdown("</div>", unsafe_allow_html=True)
+st.divider()
 
 
 profile = Profile(
@@ -285,7 +378,7 @@ if run_analysis:
         st.stop()
 
     model_id = "gpt-4o-mini"
-    company_count = 20
+    company_count = 30
     agent = make_agent(model_id)
     resume_insights = analyze_resume(agent, resume_text, profile, company_count)
     inferred_role = resume_insights.get("inferred_role", "")
@@ -309,8 +402,13 @@ if run_analysis:
         news_items = collect_news(profile, rss_urls, news_query)
 
     suggested_companies = resume_insights.get("suggested_companies", [])
-    news_companies = extract_companies_from_news(agent, news_items, int(company_count))
-    suggested_companies = dedupe_company_list(suggested_companies + news_companies)
+    company_search_items = collect_company_search_items(
+        profile.industry,
+        inferred_industry,
+        resume_keywords,
+    )
+    discovered_companies = extract_companies_from_items(agent, company_search_items, int(company_count))
+    suggested_companies = dedupe_company_list(suggested_companies + discovered_companies)
 
     news_summary = summarize_news(agent, news_items)
 
@@ -321,34 +419,42 @@ if run_analysis:
             enrich_with_agent(agent, profile, news_items[:10])
 
     st.header("Analysis")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Strengths")
+    tabs = st.tabs(["Strengths", "Strategy", "Industry news", "Target companies"])
+
+    with tabs[0]:
         if strengths:
             for item in strengths:
-                st.write(f"- {item}")
+                st.markdown(
+                    f'<div class="tab-card">{item}</div>',
+                    unsafe_allow_html=True,
+                )
         else:
-            st.write("No strengths generated yet.")
+            st.info("No strengths generated yet.")
 
-        st.subheader("Strategy")
+    with tabs[1]:
         if strategy:
             for item in strategy:
-                st.write(f"- {item}")
+                st.markdown(
+                    f'<div class="tab-card green">{item}</div>',
+                    unsafe_allow_html=True,
+                )
         else:
-            st.write("No strategy generated yet.")
-        st.subheader("Industry News")
+            st.info("No strategy generated yet.")
+
+    with tabs[2]:
         if news_summary:
             st.write(news_summary)
         else:
-            st.write("No summary available.")
-
-        st.subheader("Top Links")
+            st.info("No summary available.")
+        st.markdown("### Top links")
         for item in news_items[:8]:
-            st.markdown(f"- [{item.get('title','')}]({item.get('url','')})")
-            st.caption(f"{item.get('source','')} • {item.get('published','')}")
+            st.markdown(
+                f'<div class="news-item"><div class="news-title"><a href="{item.get("url","")}" target="_blank">{item.get("title","")}</a></div>'
+                f'<div class="news-meta">{item.get("source","")} • {item.get("published","")}</div></div>',
+                unsafe_allow_html=True,
+            )
 
-    with col2:
-        st.subheader("Target Companies")
+    with tabs[3]:
         if not suggested_companies:
             st.info("No company targets generated yet.")
         else:
@@ -358,7 +464,7 @@ if run_analysis:
                     {
                         "Company": company.get("name", ""),
                         "Category": company.get("category", ""),
-                        "Notes": company.get("notes", ""),
+                        "Why it fits": company.get("notes", ""),
                     }
                 )
             st.dataframe(rows, use_container_width=True)
