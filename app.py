@@ -36,6 +36,7 @@ class Profile:
     seniority: str
     keywords: List[str]
     exclusions: List[str]
+    note: str
 
 
 def normalize_list(value: str) -> List[str]:
@@ -184,7 +185,8 @@ def analyze_resume(agent: Any, resume_text: str, inputs: Profile, company_count:
         f"- Skills: {', '.join(inputs.skills)}\n"
         f"- Location: {inputs.location}\n"
         f"- Seniority: {inputs.seniority}\n"
-        f"- Keywords: {', '.join(inputs.keywords)}\n\n"
+        f"- Keywords: {', '.join(inputs.keywords)}\n"
+        f"- Note: {inputs.note}\n\n"
         f"Resume:\n{resume_text}\n"
     )
     try:
@@ -258,6 +260,24 @@ def summarize_news(agent: Any, news_items: List[Dict[str, Any]]) -> str:
         return (text or "").strip()
     except Exception:
         return ""
+
+
+def infer_role(agent: Any, resume_text: str) -> str:
+    if not agent or not resume_text.strip():
+        return ""
+    prompt = (
+        "Infer the most likely target role from this resume. "
+        "Return a short role title only.\n\n"
+        f"Resume:\n{resume_text}\n"
+    )
+    try:
+        response = agent.run(prompt)
+        text = getattr(response, "content", None) or getattr(response, "output", None)
+        return (text or "").strip().splitlines()[0][:80]
+    except Exception:
+        return ""
+
+
 
 
 
@@ -380,9 +400,9 @@ st.markdown(
 )
 st.markdown(
     '<div class="stepper">'
-    '<span class="step"><span class="step-badge">1</span>Fill in details</span>'
+    '<span class="step"><span class="step-badge">1</span>Upload resume</span>'
     '<span class="step-divider"></span>'
-    '<span class="step"><span class="step-badge">2</span>Upload resume</span>'
+    '<span class="step"><span class="step-badge">2</span>Fill in details</span>'
     '<span class="step-divider"></span>'
     '<span class="step"><span class="step-badge">3</span>Get your strategy</span>'
     '</div>',
@@ -390,18 +410,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="input-title"><span class="input-badge">1</span>What are you looking for?</div>',
-    unsafe_allow_html=True,
-)
-col_a, col_b, col_c = st.columns(3)
-with col_a:
-    role = st.text_input("Target role", "")
-with col_b:
-    industry = st.text_input("Industry", "")
-with col_c:
-    location = st.text_input("Location", "")
-st.markdown(
-    '<div class="input-title"><span class="input-badge">2</span>Upload your resume</div>',
+    '<div class="input-title"><span class="input-badge">1</span>Upload your resume</div>',
     unsafe_allow_html=True,
 )
 resume_file = st.file_uploader("Upload resume (PDF)", type=["pdf"])
@@ -410,18 +419,79 @@ if resume_file is not None:
         f'<span class="badge-success">✓ {resume_file.name}</span>',
         unsafe_allow_html=True,
     )
-run_analysis = st.button("Run analysis", use_container_width=True)
+
+resume_text = ""
+if resume_file is not None:
+    resume_text = extract_pdf_text(resume_file.getvalue())
+
+model_id = "gpt-4o-mini"
+agent = make_agent(model_id)
+
+if resume_text and agent and st.session_state.get("resume_name") != resume_file.name:
+    st.session_state.suggested_role = infer_role(agent, resume_text)
+    st.session_state.resume_name = resume_file.name
+    if st.session_state.suggested_role:
+        st.session_state["target_role"] = st.session_state.suggested_role
+
+st.markdown(
+    '<div class="input-title"><span class="input-badge">2</span>What are you looking for?</div>',
+    unsafe_allow_html=True,
+)
+inputs_disabled = resume_file is None
+col_a, col_b, col_c = st.columns(3)
+with col_a:
+    role = st.text_input(
+        "Target role",
+        key="target_role",
+        disabled=inputs_disabled,
+    )
+with col_b:
+    industry_options = [
+        "Healthcare",
+        "Healthtech",
+        "Fintech",
+        "SaaS",
+        "AI/ML",
+        "Biotech",
+        "Insurance",
+        "Payments",
+        "Enterprise",
+        "Consumer",
+    ]
+    industries = st.multiselect(
+        "Industries",
+        options=industry_options,
+        key="industry",
+        disabled=inputs_disabled,
+    )
+with col_c:
+    location_options = [
+        "San Francisco, CA",
+        "New York, NY",
+        "Los Angeles, CA",
+        "Seattle, WA",
+        "Austin, TX",
+        "Remote",
+    ]
+    locations = st.multiselect(
+        "Locations",
+        options=location_options,
+        key="location",
+        disabled=inputs_disabled,
+    )
+run_analysis = st.button("Run analysis", use_container_width=True, disabled=inputs_disabled)
 st.divider()
 
 
 profile = Profile(
     role=role.strip(),
-    industry=industry.strip(),
+    industry=", ".join([s.strip() for s in industries if s.strip()]),
     skills=[],
-    location=location.strip(),
+    location=", ".join([s.strip() for s in locations if s.strip()]),
     seniority="",
     keywords=[],
     exclusions=[],
+    note="",
 )
 
 
@@ -437,16 +507,14 @@ def collect_news(profile: Profile, rss_urls: List[str], query: str) -> List[Dict
 
 
 if run_analysis:
-    resume_text = ""
-    if resume_file is not None:
-        resume_text = extract_pdf_text(resume_file.getvalue())
     if not resume_text:
         st.warning("Upload a resume to continue.")
         st.stop()
 
-    model_id = "gpt-4o-mini"
     company_count = 30
-    agent = make_agent(model_id)
+    if not agent:
+        st.warning("Agno not available. Install requirements and restart.")
+        st.stop()
     resume_insights = analyze_resume(agent, resume_text, profile, company_count)
     inferred_role = resume_insights.get("inferred_role", "")
     inferred_industry = resume_insights.get("inferred_industry", "")
@@ -479,11 +547,8 @@ if run_analysis:
 
     news_summary = summarize_news(agent, news_items)
 
-    if not agent:
-        st.warning("Agno not available. Install requirements and restart.")
-    else:
-        with st.spinner("Explaining matches..."):
-            enrich_with_agent(agent, profile, news_items[:10])
+    with st.spinner("Explaining matches..."):
+        enrich_with_agent(agent, profile, news_items[:10])
 
     st.header("Analysis")
     tabs = st.tabs(["Strengths", "Strategy", "Industry news", "Target companies"])
@@ -537,6 +602,7 @@ if run_analysis:
             row_height = 36
             table_height = max(200, (len(rows) + 1) * row_height)
             st.dataframe(rows, use_container_width=True, height=table_height)
+
 
 else:
     st.info("Upload a resume and click Run analysis.")

@@ -1,12 +1,25 @@
 # Resume Strategy Agent
 
-Streamlit app that analyzes a resume, summarizes industry news, and produces a target company radar (no job scraping).
+Resume Strategy Agent helps job seekers turn a resume into a focused search plan. It analyzes your resume, suggests a target role, summarizes what’s happening in your industry, and surfaces a radar of relevant companies to target.
+
+Use it to:
+- Clarify what roles you’re best positioned for
+- Build a targeted company list instead of spray‑and‑pray
+- Stay current on industry trends that shape hiring
 
 ## Features
 - PDF resume upload (in‑memory).
+- Auto‑suggested target role from resume.
+- Industry + location multi‑selects.
 - Resume strengths + strategy tied to industry trends.
 - Industry news summary + top links.
-- Target company list derived from resume + news.
+- Target company list derived from resume + industry discovery.
+
+## Typical workflow
+1) Upload your resume.  
+2) Confirm or adjust the suggested target role.  
+3) Pick industries and locations.  
+4) Run analysis to get strengths, strategy, industry pulse, and company targets.
 
 ## Setup
 ```bash
@@ -28,5 +41,5 @@ OPENAI_API_KEY=your_key_here
 ```
 
 ## Notes
-- Uses OpenAI via Agno (model id configurable in the UI).
+- Uses OpenAI via Agno (model id set in code).
 - News comes from Google News RSS queries built from the resume/inputs.
