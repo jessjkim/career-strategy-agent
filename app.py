@@ -240,9 +240,9 @@ def analyze_resume(agent: Any, resume_text: str, inputs: Profile, company_count:
         "strategy, keywords, suggested_companies.\n"
         "strengths: 4-6 bullets. strategy: 3-5 bullets tied to industry trends.\n"
         "keywords: 8-12 short phrases.\n"
-        f"suggested_companies: list of {company_count} objects with name, category, notes, ats, ats_slug.\n"
-        "ats must be one of: lever, greenhouse, smartrecruiters.\n"
-        "ats_slug is the company slug for that ATS.\n"
+        f"suggested_companies: list of {company_count} objects with name, category, notes, ats, ats_slug, job_url.\n"
+        "ats must be one of: lever, greenhouse, smartrecruiters. ats_slug is the company slug for that ATS.\n"
+        "job_url is optional; include only if you know a specific role posting.\n"
         "Only include real, currently operating companies. Do not invent names.\n\n"
         f"Inputs:\n"
         f"- Target role: {inputs.role}\n"
@@ -321,19 +321,18 @@ if st.button("Run analysis"):
     strengths = resume_insights.get("strengths", [])
     strategy = resume_insights.get("strategy", [])
     suggested_companies = resume_insights.get("suggested_companies", [])
-    verified_companies = []
+    enriched_companies = []
     for company in suggested_companies:
-        name = company.get("name", "")
-        job_url = find_job_url_from_ats(
-            company,
-            profile.role or inferred_role or "",
-            resume_keywords,
-        )
+        job_url = company.get("job_url", "")
         if not job_url:
-            continue
+            job_url = find_job_url_from_ats(
+                company,
+                profile.role or inferred_role or "",
+                resume_keywords,
+            )
         company["job_url"] = job_url
-        verified_companies.append(company)
-    suggested_companies = verified_companies
+        enriched_companies.append(company)
+    suggested_companies = enriched_companies
 
     rss_urls = list(DEFAULT_NEWS_RSS)
     query_parts = [
