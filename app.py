@@ -276,12 +276,60 @@ st.markdown(
         color: #6b7280;
         margin-bottom: 24px;
     }
-    .input-card {
-        background: #f7f7f4;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 18px;
-        margin-bottom: 12px;
+    .cta-wrap {
+        text-align: center;
+        margin: 8px 0 18px;
+    }
+    .stepper {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        font-weight: 600;
+        color: #4b5563;
+        margin: 14px 0 4px;
+    }
+    .step {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .step-badge {
+        width: 26px;
+        height: 26px;
+        border-radius: 999px;
+        background: #2f6fed;
+        color: #ffffff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 700;
+    }
+    .step-divider {
+        width: 36px;
+        height: 1px;
+        background: #d1d5db;
+    }
+    .input-title {
+        font-size: 18px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+    .input-badge {
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        background: #dbeafe;
+        color: #1d4ed8;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
     }
     .badge-success {
         display: inline-flex;
@@ -326,9 +374,25 @@ st.markdown(
     '<div class="app-subtitle">Upload your resume and get a personalized job search strategy</div>',
     unsafe_allow_html=True,
 )
+st.markdown(
+    '<div class="cta-wrap">We’ll analyze your strengths, build a target company radar, and summarize the most relevant industry signals.</div>',
+    unsafe_allow_html=True,
+)
+st.markdown(
+    '<div class="stepper">'
+    '<span class="step"><span class="step-badge">1</span>Fill in details</span>'
+    '<span class="step-divider"></span>'
+    '<span class="step"><span class="step-badge">2</span>Upload resume</span>'
+    '<span class="step-divider"></span>'
+    '<span class="step"><span class="step-badge">3</span>Get your strategy</span>'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
-st.markdown('<div class="input-card">', unsafe_allow_html=True)
-st.subheader("Inputs")
+st.markdown(
+    '<div class="input-title"><span class="input-badge">1</span>What are you looking for?</div>',
+    unsafe_allow_html=True,
+)
 col_a, col_b, col_c = st.columns(3)
 with col_a:
     role = st.text_input("Target role", "")
@@ -336,6 +400,10 @@ with col_b:
     industry = st.text_input("Industry", "")
 with col_c:
     location = st.text_input("Location", "")
+st.markdown(
+    '<div class="input-title"><span class="input-badge">2</span>Upload your resume</div>',
+    unsafe_allow_html=True,
+)
 resume_file = st.file_uploader("Upload resume (PDF)", type=["pdf"])
 if resume_file is not None:
     st.markdown(
@@ -343,7 +411,6 @@ if resume_file is not None:
         unsafe_allow_html=True,
     )
 run_analysis = st.button("Run analysis", use_container_width=True)
-st.markdown("</div>", unsafe_allow_html=True)
 st.divider()
 
 
@@ -467,7 +534,9 @@ if run_analysis:
                         "Why it fits": company.get("notes", ""),
                     }
                 )
-            st.dataframe(rows, use_container_width=True)
+            row_height = 36
+            table_height = max(200, (len(rows) + 1) * row_height)
+            st.dataframe(rows, use_container_width=True, height=table_height)
 
 else:
     st.info("Upload a resume and click Run analysis.")
