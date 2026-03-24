@@ -7,6 +7,8 @@ Use it to:
 - Build a targeted company list instead of spray‑and‑pray
 - Stay current on industry trends that shape hiring
 
+[screen-capture.webm](https://github.com/user-attachments/assets/5fda02db-4489-455f-bb0e-556cb0f920e8)
+
 ## Features
 - PDF resume upload (in‑memory).
 - Auto‑suggested target role from resume.
