@@ -44,4 +44,4 @@ OPENAI_API_KEY=your_key_here
 
 ## Notes
 - Uses OpenAI via Agno (model id set in code).
-- News comes from Google News RSS queries built from the resume/inputs.
+- Uses an AI agent (Agno + OpenAI) for resume analysis and summarization.
