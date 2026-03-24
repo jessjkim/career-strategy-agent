@@ -281,7 +281,7 @@ def infer_role(agent: Any, resume_text: str) -> str:
 
 
 
-st.set_page_config(page_title="Resume Strategy Agent", layout="wide")
+st.set_page_config(page_title="Career Strategy Agent", layout="wide")
 
 st.markdown(
     """
