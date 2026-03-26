@@ -11,12 +11,6 @@ Use it to:
 
 [screen-capture.webm](https://github.com/user-attachments/assets/5fda02db-4489-455f-bb0e-556cb0f920e8)
 
-
-
-https://github.com/user-attachments/assets/1249739a-ea67-4632-9d54-2d4315afe4f9
-
-
-
 ## Features
 - PDF resume upload (in‑memory).
 - Auto‑suggested target role from resume.
